@@ -1,0 +1,22 @@
+{
+  "wrapper": {
+    "sign_offset": "0x56D81D1"
+  },
+  "appinfo": {
+    "Os": "Linux",
+    "Kernel": "Linux",
+    "VendorOs": "linux",
+    "CurrentVersion": "3.2.27-47354",
+    "MiscBitmap": 32764,
+    "PtVersion": "2.0.0",
+    "SsoVersion": 19,
+    "PackageName": "com.tencent.qq",
+    "WtLoginSdk": "nt.wtlogin.0.0.1",
+    "AppId": 1600001615,
+    "SubAppId": 537313942,
+    "AppClientVersion": 47354,
+    "MainSigMap": 169742560,
+    "SubSigMap": 0,
+    "NTLoginType": 1
+  }
+}
