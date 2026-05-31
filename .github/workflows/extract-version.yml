@@ -21,29 +21,28 @@ jobs:
           mkdir -p /tmp/qq-extract
           dpkg-deb -x /tmp/qq.deb /tmp/qq-extract
 
-      - name: Extract sign offset and version info
-        id: info
+      - name: Detect version
+        id: detect
         run: |
           APP=/tmp/qq-extract/opt/QQ/resources/app
-          OFFSET=$(python3 scripts/extract_sign_offset.py "$APP/wrapper.node")
           VERSION=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['version'])")
           PLATFORM=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['platform'])")
           ARCH=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['eleArch'])")
           KEY="${PLATFORM}-${ARCH}/${VERSION}"
-          echo "offset=${OFFSET}" >> "$GITHUB_OUTPUT"
+          OFFSET=$(python3 scripts/extract_sign_offset.py "$APP/wrapper.node")
           echo "key=${KEY}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "offset=${OFFSET} key=${KEY}"
+          echo "offset=${OFFSET}" >> "$GITHUB_OUTPUT"
+          echo "Detected: ${KEY} offset=${OFFSET}"
 
       - name: Generate version JSON and update index
         run: |
-          KEY="${{ steps.info.outputs.key }}"
-          OFFSET="${{ steps.info.outputs.offset }}"
-          VERSION="${{ steps.info.outputs.version }}"
+          KEY="${{ steps.detect.outputs.key }}"
+          VERSION="${{ steps.detect.outputs.version }}"
+          OFFSET="${{ steps.detect.outputs.offset }}"
           CLIENT_VER="${VERSION##*-}"
-          FILE="${KEY}.json"
 
-          mkdir -p "$(dirname "$FILE")"
+          mkdir -p "versions/$(dirname "$KEY")"
           python3 -c "
           import json, sys
           data = {
@@ -59,7 +58,7 @@ jobs:
               }
           }
           json.dump(data, open(sys.argv[4], 'w'), indent=2)
-          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$FILE"
+          " "$OFFSET" "$VERSION" "$CLIENT_VER" "versions/${KEY}.json"
 
           python3 -c "
           import json, sys
@@ -69,7 +68,7 @@ jobs:
               idx = {}
           idx[sys.argv[1]] = {'file': sys.argv[2]}
           json.dump(idx, open('versions/index.json', 'w'), indent=2)
-          " "$KEY" "$FILE"
+          " "$KEY" "${KEY}.json"
 
       - name: Commit and push
         run: |
@@ -77,7 +76,7 @@ jobs:
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit -m "extract version ${{ steps.info.outputs.key }}"
+            git commit -m "extract version ${{ steps.detect.outputs.key }}"
             git push
           else
             echo "No changes, version already exists"

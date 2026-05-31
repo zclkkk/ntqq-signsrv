@@ -28,13 +28,22 @@ jobs:
       - name: Compile stub to runtime/
         run: gcc -shared -fPIC -o runtime/libsymbols.so stubs/symbols.c
 
-      - name: Ensure version data exists
+      - name: Detect version
+        id: detect
         run: |
           APP=runtime/app
           VERSION=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['version'])")
           PLATFORM=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['platform'])")
           ARCH=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['eleArch'])")
           KEY="${PLATFORM}-${ARCH}/${VERSION}"
+          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Detected: ${KEY}"
+
+      - name: Ensure version data exists
+        run: |
+          KEY="${{ steps.detect.outputs.key }}"
+          VERSION="${{ steps.detect.outputs.version }}"
 
           EXISTS=$(python3 -c "
           import json, sys
@@ -45,12 +54,16 @@ jobs:
               print('false')
           " "$KEY")
 
-          if [ "$EXISTS" = "false" ]; then
+          if [ "$EXISTS" = "true" ]; then
+            echo "Version ${KEY} already exists"
+            exit 0
+          fi
+
           echo "Version ${KEY} not found, extracting..."
-          OFFSET=$(python3 scripts/extract_sign_offset.py "$APP/wrapper.node")
+          OFFSET=$(python3 scripts/extract_sign_offset.py runtime/app/wrapper.node)
           CLIENT_VER="${VERSION##*-}"
-          FILE="${KEY}.json"
-          mkdir -p "$(dirname "$FILE")"
+          JSON_PATH="versions/${KEY}.json"
+          mkdir -p "$(dirname "$JSON_PATH")"
 
           python3 -c "
           import json, sys
@@ -67,7 +80,7 @@ jobs:
               }
           }
           json.dump(data, open(sys.argv[4], 'w'), indent=2)
-          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$FILE"
+          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$JSON_PATH"
 
           python3 -c "
           import json, sys
@@ -77,7 +90,7 @@ jobs:
               idx = {}
           idx[sys.argv[1]] = {'file': sys.argv[2]}
           json.dump(idx, open('versions/index.json', 'w'), indent=2)
-          " "$KEY" "$FILE"
+          " "$KEY" "${KEY}.json"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -85,9 +98,6 @@ jobs:
           git commit -m "extract version ${KEY}"
           git push
           echo "Extracted: offset=${OFFSET} key=${KEY}"
-          else
-          echo "Version ${KEY} already exists"
-          fi
 
       - name: Build release binary
         run: cargo build --release
