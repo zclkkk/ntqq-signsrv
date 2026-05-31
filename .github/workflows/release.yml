@@ -2,9 +2,23 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      deb_url:
+        description: "QQ .deb download URL"
+        required: true
 
 jobs:
-  build:
+  # 1. Ensure version data exists (calls extract-version, no-op if already present)
+  ensure-version:
+    uses: ./.github/workflows/extract-version.yml
+    with:
+      deb_url: ${{ inputs.deb_url }}
+    permissions:
+      contents: write
+
+  # 2. Build and release
+  release:
+    needs: ensure-version
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -20,6 +34,13 @@ jobs:
       - name: Compile stub
         run: gcc -shared -fPIC -o libsymbols.so stubs/symbols.c
 
+      - name: Download and extract QQ runtime
+        run: |
+          curl -sL -o /tmp/qq.deb "${{ inputs.deb_url }}"
+          mkdir -p runtime/app
+          dpkg-deb -x /tmp/qq.deb /tmp/qq-extract
+          cp -r /tmp/qq-extract/opt/QQ/resources/app/* runtime/app/
+
       - name: Package
         id: package
         run: |
@@ -31,6 +52,7 @@ jobs:
           cp libsymbols.so "$DIR/"
           cp config.toml "$DIR/"
           cp -r versions "$DIR/"
+          cp -r runtime "$DIR/"
           tar czf "${NAME}-linux-x64.tar.gz" "$DIR"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 

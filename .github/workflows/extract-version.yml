@@ -6,24 +6,34 @@ on:
       deb_url:
         description: "QQ .deb download URL"
         required: true
+  workflow_call:
+    inputs:
+      deb_url:
+        type: string
+        required: true
+    outputs:
+      version_key:
+        value: ${{ jobs.extract.outputs.version_key }}
 
 jobs:
   extract:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version_key: ${{ steps.info.outputs.key }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Download QQ .deb
         run: curl -sL -o /tmp/qq.deb "${{ inputs.deb_url }}"
 
-      - name: Extract wrapper.node
+      - name: Extract
         run: |
           mkdir -p /tmp/qq-extract
           dpkg-deb -x /tmp/qq.deb /tmp/qq-extract
 
-      - name: Extract sign offset
+      - name: Extract sign offset and version info
         id: info
         run: |
           APP=/tmp/qq-extract/opt/QQ/resources/app
@@ -69,7 +79,6 @@ jobs:
               }
           }
           json.dump(data, open(sys.argv[4], 'w'), indent=2)
-          print(json.dumps(data, indent=2))
           " "$OFFSET" "$VERSION" "$CLIENT_VER" "$FILE"
 
       - name: Update index.json
@@ -84,7 +93,6 @@ jobs:
               idx = {}
           idx[sys.argv[1]] = {'file': sys.argv[2]}
           json.dump(idx, open('versions/index.json', 'w'), indent=2)
-          print(json.dumps(idx, indent=2))
           " "$KEY" "$FILE"
 
       - name: Commit and push
@@ -92,5 +100,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add versions/
-          git commit -m "extract version ${{ steps.info.outputs.key }}"
+          git diff --cached --quiet || git commit -m "extract version ${{ steps.info.outputs.key }}"
           git push
