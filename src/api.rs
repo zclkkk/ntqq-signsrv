@@ -54,17 +54,25 @@ async fn handle_sign(
         Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
     };
 
-    let signer = state.signer.lock().unwrap();
-    let (buf, _ret) = signer.sign(&req.cmd, &src, req.seq);
-    let output = sign::parse_output(&buf);
+    let platform = state.platform.clone();
+    let version = state.version.clone();
+    let state = state.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let signer = state.signer.lock().unwrap();
+        let (buf, _ret) = signer.sign(&req.cmd, &src, req.seq);
+        sign::parse_output(&buf)
+    })
+    .await
+    .unwrap();
 
     Json(SignResponse {
-        platform: state.platform.clone(),
-        version: state.version.clone(),
+        platform,
+        version,
         value: SignValue {
-            sign: hex::encode(&output.sign),
-            token: hex::encode(&output.token),
-            extra: hex::encode(&output.extra),
+            sign: hex::encode(&result.sign),
+            token: hex::encode(&result.token),
+            extra: hex::encode(&result.extra),
         },
     }).into_response()
 }
