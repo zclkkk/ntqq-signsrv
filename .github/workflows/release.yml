@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      deb_url:
+        description: "QQ .deb download URL"
+        required: true
+
+jobs:
+  # 1. Ensure version data exists (calls extract-version, no-op if already present)
+  ensure-version:
+    uses: ./.github/workflows/extract-version.yml
+    with:
+      deb_url: ${{ inputs.deb_url }}
+    permissions:
+      contents: write
+
+  # 2. Build and release
+  release:
+    needs: ensure-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Compile stub
+        run: gcc -shared -fPIC -o libsymbols.so stubs/symbols.c
+
+      - name: Download and extract QQ runtime
+        run: |
+          curl -sL -o /tmp/qq.deb "${{ inputs.deb_url }}"
+          mkdir -p runtime/app
+          dpkg-deb -x /tmp/qq.deb /tmp/qq-extract
+          cp -r /tmp/qq-extract/opt/QQ/resources/app/* runtime/app/
+
+      - name: Package
+        id: package
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
+          NAME="ntqq-signsrv-${TIMESTAMP}"
+          DIR=ntqq-signsrv-linux-x64
+          mkdir "$DIR"
+          cp target/release/ntqq-signsrv "$DIR/"
+          cp libsymbols.so "$DIR/"
+          cp config.toml "$DIR/"
+          cp -r versions "$DIR/"
+          cp -r runtime "$DIR/"
+          tar czf "${NAME}-linux-x64.tar.gz" "$DIR"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.package.outputs.name }}
+          tag_name: ${{ steps.package.outputs.name }}
+          files: ${{ steps.package.outputs.name }}-linux-x64.tar.gz
