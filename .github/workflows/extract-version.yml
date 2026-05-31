@@ -28,18 +28,21 @@ jobs:
           VERSION=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['version'])")
           PLATFORM=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['platform'])")
           ARCH=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['eleArch'])")
+          APPID=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['appid']['linux'])")
           KEY="${PLATFORM}-${ARCH}/${VERSION}"
           OFFSET=$(python3 scripts/extract_sign_offset.py "$APP/wrapper.node")
           echo "key=${KEY}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "offset=${OFFSET}" >> "$GITHUB_OUTPUT"
-          echo "Detected: ${KEY} offset=${OFFSET}"
+          echo "appid=${APPID}" >> "$GITHUB_OUTPUT"
+          echo "Detected: ${KEY} offset=${OFFSET} appid=${APPID}"
 
       - name: Generate version JSON and update index
         run: |
           KEY="${{ steps.detect.outputs.key }}"
           VERSION="${{ steps.detect.outputs.version }}"
           OFFSET="${{ steps.detect.outputs.offset }}"
+          APPID="${{ steps.detect.outputs.appid }}"
           CLIENT_VER="${VERSION##*-}"
 
           mkdir -p "versions/$(dirname "$KEY")"
@@ -52,13 +55,13 @@ jobs:
                   'CurrentVersion': sys.argv[2], 'MiscBitmap': 32764,
                   'PtVersion': '2.0.0', 'SsoVersion': 19,
                   'PackageName': 'com.tencent.qq', 'WtLoginSdk': 'nt.wtlogin.0.0.1',
-                  'AppId': 1600001615, 'SubAppId': 537313942,
+                  'AppId': 1600001615, 'SubAppId': int(sys.argv[5]),
                   'AppClientVersion': int(sys.argv[3]),
                   'MainSigMap': 169742560, 'SubSigMap': 0, 'NTLoginType': 1
               }
           }
           json.dump(data, open(sys.argv[4], 'w'), indent=2)
-          " "$OFFSET" "$VERSION" "$CLIENT_VER" "versions/${KEY}.json"
+          " "$OFFSET" "$VERSION" "$CLIENT_VER" "versions/${KEY}.json" "$APPID"
 
           python3 -c "
           import json, sys

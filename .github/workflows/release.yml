@@ -35,10 +35,12 @@ jobs:
           VERSION=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['version'])")
           PLATFORM=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['platform'])")
           ARCH=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['eleArch'])")
+          APPID=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['appid']['linux'])")
           KEY="${PLATFORM}-${ARCH}/${VERSION}"
           echo "key=${KEY}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Detected: ${KEY}"
+          echo "appid=${APPID}" >> "$GITHUB_OUTPUT"
+          echo "Detected: ${KEY} appid=${APPID}"
 
       - name: Ensure version data exists
         run: |
@@ -60,6 +62,7 @@ jobs:
           fi
 
           echo "Version ${KEY} not found, extracting..."
+          APPID="${{ steps.detect.outputs.appid }}"
           OFFSET=$(python3 scripts/extract_sign_offset.py runtime/app/wrapper.node)
           CLIENT_VER="${VERSION##*-}"
           JSON_PATH="versions/${KEY}.json"
@@ -74,13 +77,13 @@ jobs:
                   'CurrentVersion': sys.argv[2], 'MiscBitmap': 32764,
                   'PtVersion': '2.0.0', 'SsoVersion': 19,
                   'PackageName': 'com.tencent.qq', 'WtLoginSdk': 'nt.wtlogin.0.0.1',
-                  'AppId': 1600001615, 'SubAppId': 537313942,
+                  'AppId': 1600001615, 'SubAppId': int(sys.argv[5]),
                   'AppClientVersion': int(sys.argv[3]),
                   'MainSigMap': 169742560, 'SubSigMap': 0, 'NTLoginType': 1
               }
           }
           json.dump(data, open(sys.argv[4], 'w'), indent=2)
-          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$JSON_PATH"
+          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$JSON_PATH" "$APPID"
 
           python3 -c "
           import json, sys
