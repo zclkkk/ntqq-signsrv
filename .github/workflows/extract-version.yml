@@ -1,0 +1,84 @@
+name: Extract Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      deb_url:
+        description: "QQ .deb download URL"
+        required: true
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and extract QQ .deb
+        run: |
+          curl -sL -o /tmp/qq.deb "${{ inputs.deb_url }}"
+          mkdir -p /tmp/qq-extract
+          dpkg-deb -x /tmp/qq.deb /tmp/qq-extract
+
+      - name: Extract sign offset and version info
+        id: info
+        run: |
+          APP=/tmp/qq-extract/opt/QQ/resources/app
+          OFFSET=$(python3 scripts/extract_sign_offset.py "$APP/wrapper.node")
+          VERSION=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['version'])")
+          PLATFORM=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['platform'])")
+          ARCH=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['eleArch'])")
+          KEY="${PLATFORM}-${ARCH}/${VERSION}"
+          echo "offset=${OFFSET}" >> "$GITHUB_OUTPUT"
+          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "offset=${OFFSET} key=${KEY}"
+
+      - name: Generate version JSON and update index
+        run: |
+          KEY="${{ steps.info.outputs.key }}"
+          OFFSET="${{ steps.info.outputs.offset }}"
+          VERSION="${{ steps.info.outputs.version }}"
+          CLIENT_VER="${VERSION##*-}"
+          FILE="${KEY}.json"
+
+          mkdir -p "$(dirname "$FILE")"
+          python3 -c "
+          import json, sys
+          data = {
+              'wrapper': {'sign_offset': sys.argv[1]},
+              'appinfo': {
+                  'Os': 'Linux', 'Kernel': 'Linux', 'VendorOs': 'linux',
+                  'CurrentVersion': sys.argv[2], 'MiscBitmap': 32764,
+                  'PtVersion': '2.0.0', 'SsoVersion': 19,
+                  'PackageName': 'com.tencent.qq', 'WtLoginSdk': 'nt.wtlogin.0.0.1',
+                  'AppId': 1600001615, 'SubAppId': 537313942,
+                  'AppClientVersion': int(sys.argv[3]),
+                  'MainSigMap': 169742560, 'SubSigMap': 0, 'NTLoginType': 1
+              }
+          }
+          json.dump(data, open(sys.argv[4], 'w'), indent=2)
+          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$FILE"
+
+          python3 -c "
+          import json, sys
+          try:
+              idx = json.load(open('versions/index.json'))
+          except:
+              idx = {}
+          idx[sys.argv[1]] = {'file': sys.argv[2]}
+          json.dump(idx, open('versions/index.json', 'w'), indent=2)
+          " "$KEY" "$FILE"
+
+      - name: Commit and push
+        run: |
+          git add versions/
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "extract version ${{ steps.info.outputs.key }}"
+            git push
+          else
+            echo "No changes, version already exists"
+          fi

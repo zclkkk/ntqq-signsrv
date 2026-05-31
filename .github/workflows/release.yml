@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      deb_url:
+        description: "QQ .deb download URL"
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download and extract QQ .deb
+        run: |
+          curl -sL -o /tmp/qq.deb "${{ inputs.deb_url }}"
+          mkdir -p runtime/app
+          dpkg-deb -x /tmp/qq.deb /tmp/qq-extract
+          cp -r /tmp/qq-extract/opt/QQ/resources/app/* runtime/app/
+
+      - name: Compile stub to runtime/
+        run: gcc -shared -fPIC -o runtime/libsymbols.so stubs/symbols.c
+
+      - name: Ensure version data exists
+        run: |
+          APP=runtime/app
+          VERSION=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['version'])")
+          PLATFORM=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['platform'])")
+          ARCH=$(python3 -c "import json; print(json.load(open('$APP/package.json'))['eleArch'])")
+          KEY="${PLATFORM}-${ARCH}/${VERSION}"
+
+          EXISTS=$(python3 -c "
+          import json, sys
+          try:
+              idx = json.load(open('versions/index.json'))
+              print('true' if sys.argv[1] in idx else 'false')
+          except:
+              print('false')
+          " "$KEY")
+
+          if [ "$EXISTS" = "false" ]; then
+          echo "Version ${KEY} not found, extracting..."
+          OFFSET=$(python3 scripts/extract_sign_offset.py "$APP/wrapper.node")
+          CLIENT_VER="${VERSION##*-}"
+          FILE="${KEY}.json"
+          mkdir -p "$(dirname "$FILE")"
+
+          python3 -c "
+          import json, sys
+          data = {
+              'wrapper': {'sign_offset': sys.argv[1]},
+              'appinfo': {
+                  'Os': 'Linux', 'Kernel': 'Linux', 'VendorOs': 'linux',
+                  'CurrentVersion': sys.argv[2], 'MiscBitmap': 32764,
+                  'PtVersion': '2.0.0', 'SsoVersion': 19,
+                  'PackageName': 'com.tencent.qq', 'WtLoginSdk': 'nt.wtlogin.0.0.1',
+                  'AppId': 1600001615, 'SubAppId': 537313942,
+                  'AppClientVersion': int(sys.argv[3]),
+                  'MainSigMap': 169742560, 'SubSigMap': 0, 'NTLoginType': 1
+              }
+          }
+          json.dump(data, open(sys.argv[4], 'w'), indent=2)
+          " "$OFFSET" "$VERSION" "$CLIENT_VER" "$FILE"
+
+          python3 -c "
+          import json, sys
+          try:
+              idx = json.load(open('versions/index.json'))
+          except:
+              idx = {}
+          idx[sys.argv[1]] = {'file': sys.argv[2]}
+          json.dump(idx, open('versions/index.json', 'w'), indent=2)
+          " "$KEY" "$FILE"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions/
+          git commit -m "extract version ${KEY}"
+          git push
+          echo "Extracted: offset=${OFFSET} key=${KEY}"
+          else
+          echo "Version ${KEY} already exists"
+          fi
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package
+        id: package
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
+          NAME="ntqq-signsrv-${TIMESTAMP}"
+          DIR=ntqq-signsrv-linux-x64
+          mkdir "$DIR"
+          cp target/release/ntqq-signsrv "$DIR/"
+          cp config.toml "$DIR/"
+          cp -r versions "$DIR/"
+          cp -r runtime "$DIR/"
+          tar czf "${NAME}-linux-x64.tar.gz" "$DIR"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.package.outputs.name }}
+          tag_name: ${{ steps.package.outputs.name }}
+          files: ${{ steps.package.outputs.name }}-linux-x64.tar.gz
